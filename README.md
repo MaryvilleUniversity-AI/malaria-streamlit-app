@@ -113,12 +113,8 @@ Full model training, experimentation, and notebooks:
 
 ## 📸 Screenshots
 
-*(Add screenshots to an /assets folder and link them here)*
-
-```
-![App Demo](assets/demo.png)
-![Grad-CAM Example](assets/gradcam_example.png)
-```
+![Infected Example](assets/infected_example.png)
+![Uninfected Example](assets/uninfected_example.png)
 
 ---
 

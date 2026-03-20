@@ -1,4 +1,4 @@
-import os, gdown, zipfile
+import os, gdown
 import streamlit as st
 import tensorflow as tf
 from tensorflow.keras.models import load_model
@@ -10,7 +10,6 @@ from tensorflow.keras.layers import GlobalAveragePooling2D, Dense, Dropout
 from tensorflow.keras.models import Model
 import numpy as np
 import cv2
-import matplotlib.pyplot as plt
 from PIL import Image
 
 # ---- Model Download & Load ----

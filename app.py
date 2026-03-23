@@ -9,8 +9,8 @@ from tensorflow.keras.applications.mobilenet_v2 import preprocess_input as mobil
 from tensorflow.keras.layers import GlobalAveragePooling2D, Dense, Dropout
 from tensorflow.keras.models import Model
 import numpy as np
-import cv2
 from PIL import Image
+import matplotlib.cm as cm
 
 # ---- Model Download & Load ----
 MODEL_FILES = {
@@ -134,11 +134,29 @@ def make_gradcam_heatmap(img_array, model, last_conv_layer_name):
   return heatmap.numpy()
 
 # Overlay display helper (returns image)
-def overlay_gradcam_full(img, heatmap, alpha=0.4):
-  heatmap = cv2.resize(heatmap, (img.shape[1], img.shape[0]))
-  heatmap = np.uint8(255 * heatmap)
-  heatmap = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
-  return cv2.addWeighted(img, 1 - alpha, heatmap, alpha, 0)
+def overlay_gradcam_full(img, heatmap, alpha=0.8):
+  # Convert heatmap to 0-1
+  heatmap = np.clip(heatmap, 0, 1)
+
+  # Resize heatmap to match image
+  heatmap_resized = Image.fromarray(np.uint8(255 * heatmap)).resize(img.size)
+  heatmap_resized = np.array(heatmap_resized) / 255.0
+
+  # Apply colormap
+  heatmap_colored = cm.get_cmap("jet")(heatmap_resized)[:, :, :3]
+  heatmap_colored = np.uint8(255 * heatmap_colored)
+
+  # Convert original image
+  img_np = np.array(img).astype(np.float32)
+
+  # Create mask
+  heatmap_mask = np.expand_dims(heatmap_resized, axis=-1)
+
+  # Blend
+  overlay = img_np + alpha * heatmap_mask * (heatmap_colored - img_np)
+  overlay = np.clip(overlay, 0, 255).astype(np.uint8)
+
+  return overlay
 
 # Preprocess
 def preprocess_for_model(img, model_choice):
@@ -246,13 +264,19 @@ if file:
   if show_gradcam:
     try:
       best_model_obj = models_dict[gradcam_model_name]
-      last_conv_layer_name = get_last_conv_layer_name(best_model_obj)
+      if "MobileNetV2" in gradcam_model_name:
+        last_conv_layer_name = "block_16_expand_relu"
+      else:
+        last_conv_layer_name = get_last_conv_layer_name(best_model_obj)
       img_array = preprocess_for_model(uploaded_image, gradcam_model_name)
       heatmap = make_gradcam_heatmap(img_array, best_model_obj, last_conv_layer_name)
+      heatmap = np.power(heatmap, 0.15)
+      heatmap[heatmap < 0.3] = 0
 
-      img_array_np = np.array(uploaded_image)
-      heatmap_resized = cv2.resize(heatmap, (img_array_np.shape[1], img_array_np.shape[0]))
-      overlay = overlay_gradcam_full(img_array_np, heatmap_resized, alpha=0.4)
+      # DEBUG
+      st.write("Heatmap max:", np.max(heatmap))
+
+      overlay = overlay_gradcam_full(uploaded_image, heatmap, alpha=0.8)
 
       with col2:
         st.image(overlay, caption=f"Grad-CAM ({gradcam_model_name})", width=400)

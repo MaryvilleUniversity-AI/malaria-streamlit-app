@@ -29,7 +29,6 @@ def download_models():
     output_path = os.path.join(MODEL_DIR, filename)
 
     if not os.path.exists(output_path):
-      st.toast(f"Downloading {filename}...")
       response = requests.get(file_id, stream=True)
       response.raise_for_status()
       with open(output_path, "wb") as f:

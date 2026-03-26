@@ -1,22 +1,23 @@
-import os, gdown
+import os
 import streamlit as st
 import tensorflow as tf
-from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing import image
-from tensorflow.keras import layers, models
 from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.applications.mobilenet_v2 import preprocess_input as mobilenet_preprocess
 from tensorflow.keras.layers import GlobalAveragePooling2D, Dense, Dropout
 from tensorflow.keras.models import Model
 import numpy as np
 from PIL import Image
-import matplotlib.cm as cm
+import matplotlib
+import requests
+
+# ---- Hugging Face model config ----
+HF_REPO = "DanLDevs/malaria-cell-detection"
 
 # ---- Model Download & Load ----
 MODEL_FILES = {
-  "custom_cnn_weights_only.weights.h5": "18wJ49TfpXiZksOOLSrfveyWws_VtEw9y",
-  "mobilenetv2_frozen_weights_only.weights.h5": "1rwTZRkq5gOqwajVOdinK6E58ALGBQ4uZ",
-  "mobilenetv2_finetuned_weights_only.weights.h5": "1DrvxWVJi3pYaZrkDNkZd0kreqIdurj0-"
+  "custom_cnn_weights_only.weights.h5": f"https://huggingface.co/{HF_REPO}/resolve/main/custom_cnn_weights_only.weights.h5",
+  "mobilenetv2_frozen_weights_only.weights.h5": f"https://huggingface.co/{HF_REPO}/resolve/main/malaria_mobilenetv2_frozen_weights_only.weights.h5",
+  "mobilenetv2_finetuned_weights_only.weights.h5": f"https://huggingface.co/{HF_REPO}/resolve/main/malaria_mobilenetv2_finetuned_weights_only.weights.h5"
 }
 
 MODEL_DIR = "models"
@@ -28,9 +29,12 @@ def download_models():
     output_path = os.path.join(MODEL_DIR, filename)
 
     if not os.path.exists(output_path):
-      url = f"https://drive.google.com/uc?id={file_id}"
-      print(f"Downloading {filename}...")
-      gdown.download(url, output_path, quiet=True)
+      st.info(f"Downloading {filename}...")
+      response = requests.get(file_id, stream=True)
+      response.raise_for_status()
+      with open(output_path, "wb") as f:
+        for chunk in response.iter_content(chunk_size=8192):
+          f.write(chunk)
 
 # ---- Model Builders ----
 # Custom CNN Architecture
@@ -95,6 +99,7 @@ def build_mobilenetv2_finetuned(input_shape=(128, 128,3)):
   return model
 
 # ---- Helper Functions ----
+MOBILENET_LAST_CONV = "Conv_1"
 # Helper function to get last Conv2D layer name
 def get_last_conv_layer_name(model):
   for layer in reversed(model.layers):
@@ -103,8 +108,12 @@ def get_last_conv_layer_name(model):
   raise ValueError("No Conv2D layer found in model.")
 
 # Grad-CAM heatmap generator
-def make_gradcam_heatmap(img_array, model, last_conv_layer_name):
-  # Create model that outputs both the conv layer and predictions
+def make_gradcam_heatmap(img_array, model, last_conv_layer_name, pred_index=None):
+  """
+  Generate Grad-CAM heatmap.
+  pred_index: 0 = Infected (low sigmoid), 1 = Uninfected (high sigmoid).
+  If None, uses the predicted class automatically.
+  """
   grad_model = tf.keras.models.Model(
     inputs=model.input,
     outputs=[
@@ -115,53 +124,47 @@ def make_gradcam_heatmap(img_array, model, last_conv_layer_name):
 
   with tf.GradientTape() as tape:
     conv_outputs, predictions = grad_model(img_array, training=False)
-    class_index = 0
-    loss = predictions[:, class_index]
+    # Auto-select class based on prediction if not specified
+    if pred_index is None:
+      pred_index = int(predictions[0][0] >= 0.5)
+    loss = predictions[:, 0] if pred_index == 1 else (1 - predictions[:, 0])
   
   grads = tape.gradient(loss, conv_outputs)
 
-  # Global average pooling of gradients
+  # Pool gradients over spatial dims
   pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
-
   conv_outputs = conv_outputs[0]
   heatmap = conv_outputs @ pooled_grads[..., tf.newaxis]
   heatmap = tf.squeeze(heatmap)
 
-  # Normalize
+  # ReLU + Normalize
   heatmap = tf.maximum(heatmap, 0)
   heatmap /= (tf.reduce_max(heatmap) + 1e-8)
 
   return heatmap.numpy()
 
 # Overlay display helper (returns image)
-def overlay_gradcam_full(img, heatmap, alpha=0.8):
+def overlay_gradcam_full(img: Image.Image, heatmap: np.ndarray, alpha: float = 0.45) -> Image.Image:
+  """
+  Standard addition Grad-CAM overlay. Returns a PIL Image.
+  alpha controls heatmap intensity (lower = more subtle).
+  """
   # Convert heatmap to 0-1
-  heatmap = np.clip(heatmap, 0, 1)
+  heatmap_uint8 = np.uint8(255 * np.clip(heatmap, 0, 1))
+  heatmap_pil = Image.fromarray(heatmap_uint8, mode="L").resize(img.size, Image.BILINEAR)
+  heatmap_np = np.array(heatmap_pil) / 255.0
 
-  # Resize heatmap to match image
-  heatmap_resized = Image.fromarray(np.uint8(255 * heatmap)).resize(img.size)
-  heatmap_resized = np.array(heatmap_resized) / 255.0
+  colormap = matplotlib.colormaps["jet"] # No deprecation warning
+  heatmap_colored = np.uint8(255 * colormap(heatmap_np)[:, :, :3])
 
-  # Apply colormap
-  heatmap_colored = cm.get_cmap("jet")(heatmap_resized)[:, :, :3]
-  heatmap_colored = np.uint8(255 * heatmap_colored)
-
-  # Convert original image
   img_np = np.array(img).astype(np.float32)
-
-  # Create mask
-  heatmap_mask = np.expand_dims(heatmap_resized, axis=-1)
-
-  # Blend
-  overlay = img_np + alpha * heatmap_mask * (heatmap_colored - img_np)
-  overlay = np.clip(overlay, 0, 255).astype(np.uint8)
-
-  return overlay
+  overlay = (1 - alpha) * img_np + alpha * heatmap_colored.astype(np.float32)
+  return Image.fromarray(np.uint8(np.clip(overlay, 0, 255)))
 
 # Preprocess
-def preprocess_for_model(img, model_choice):
+def preprocess_for_model(img: Image.Image, model_choice: str) -> np.ndarray:
   img = img.resize((128,128))
-  arr = np.array(img)
+  arr = np.array(img).astype(np.float32)
 
   if "MobileNetV2" in model_choice:
     arr = mobilenet_preprocess(arr)
@@ -171,9 +174,8 @@ def preprocess_for_model(img, model_choice):
   return np.expand_dims(arr, axis=0)
 
 # ---- Load Models (cached) ----
-# Cache models so they are loaded only once
 @st.cache_resource
-def load_models():
+def load_all_models():
   download_models()
   
   # --- Custom CNN ---
@@ -200,23 +202,22 @@ def load_models():
     "MobileNetV2 (Fine-tuned)": mobilenet_finetuned
   }
 
-# Load models
-with st.spinner("Loading models..."):
-  models_dict = load_models()
-
 # ---- Streamlit UI ----
 st.title("Malaria Cell Detection App")
 st.info(
-  "This model analyzes microscopic cell images to detect malaria infection. "
-  "Grad-CAM highlights regions most important for the prediction."
+  "Upload a microscopic cell image to detect malaria infection. "
+  "Enable Grad-CAM to visualize which regions drove the prediction."
 )
 
-show_gradcam = st.checkbox("Show Grad-CAM")
+# Load models
+with st.spinner("Loading models (first run may take a minute)..."):
+  models_dict = load_all_models()
 
+show_gradcam = st.checkbox("Show Grad-CAM")
 gradcam_model_name = None
 if show_gradcam:
   gradcam_model_name = st.selectbox(
-    "Select model for Grad-CAM:",
+    "Model for Grad-CAM:",
     list(models_dict.keys())
   )
 
@@ -224,62 +225,42 @@ if show_gradcam:
 file = st.file_uploader("Upload a Cell Image", type=['jpg', 'png', 'jpeg'])
 
 if file:
-
-  col1, col2 = st.columns(2)
   uploaded_image = Image.open(file).convert("RGB")
+  col1, col2 = st.columns(2)
+
   with col1:
     st.image(uploaded_image, caption="Uploaded Image", width=400)
 
-  # Dictionary to store predictions
+  # Run all models
   results = {}
-
-  # Run through all models
   for name, model_obj in models_dict.items():
     img_array = preprocess_for_model(uploaded_image, name)
     pred = float(model_obj(img_array, training=False)[0][0])
-
-    # Calculate confidence
-    threshold = 0.5
-
-    if pred >= threshold:
-      pred_class = "Uninfected"
-      confidence = pred
+    if pred >= 0.5:
+      pred_class, confidence = "Uninfected", pred
     else:
-      pred_class = "Infected"
-      confidence = 1 - pred
+      pred_class, confidence = "Infected", 1 - pred
     results[name] = {"class": pred_class, "confidence": confidence}
     
-  st.subheader("Model Prediction Summary")
-
-  # Show all model predictions
-  st.subheader("All Model Predictions")
+  st.subheader("Model Predictions")
   cols = st.columns(len(results))
   for col, (name, res) in zip(cols, results.items()):
     with col:
-      st.write(f"**{name}**")
-      st.write(f"{res['class']}")
-      st.write(f"{res['confidence']:.2%}")
+      color = "✅" if res["class"] == "Uninfected" else "❌"
+      st.metric(label=name, value=f"{color} {res['class']}", delta=f"{res['confidence']:.1%} confidence")
 
   # Grad-CAM
-  if show_gradcam:
-    try:
-      best_model_obj = models_dict[gradcam_model_name]
-      if "MobileNetV2" in gradcam_model_name:
-        last_conv_layer_name = "block_16_expand_relu"
-      else:
-        last_conv_layer_name = get_last_conv_layer_name(best_model_obj)
-      img_array = preprocess_for_model(uploaded_image, gradcam_model_name)
-      heatmap = make_gradcam_heatmap(img_array, best_model_obj, last_conv_layer_name)
-      heatmap = np.power(heatmap, 0.15)
-      heatmap[heatmap < 0.3] = 0
+  if show_gradcam and gradcam_model_name:
+    with st.spinner("Generating Grad-CAM..."):
+      try:
+        best_model_obj = models_dict[gradcam_model_name]
+        last_conv = MOBILENET_LAST_CONV if "MobileNetV2" in gradcam_model_name else get_last_conv_layer_name(best_model_obj)
+        img_array = preprocess_for_model(uploaded_image, gradcam_model_name)
+        heatmap = make_gradcam_heatmap(img_array, best_model_obj, last_conv)
+        overlay = overlay_gradcam_full(uploaded_image, heatmap, alpha=0.45)
+        with col2:
+          st.image(overlay, caption=f"Grad-CAM ({gradcam_model_name})", width=400)
+      except Exception  as e:
+        st.error(f"Grad-CAM failed: {e}")
 
-      # DEBUG
-      st.write("Heatmap max:", np.max(heatmap))
 
-      overlay = overlay_gradcam_full(uploaded_image, heatmap, alpha=0.8)
-
-      with col2:
-        st.image(overlay, caption=f"Grad-CAM ({gradcam_model_name})", width=400)
-
-    except Exception  as e:
-      st.error(f"Grad-CAM failed: {e}")

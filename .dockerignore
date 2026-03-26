@@ -1,0 +1,10 @@
+.git
+.gitignore
+.devcontainer
+__pycache__
+*.pyc
+*.pyo
+models/
+.python-version
+runtime.txt
+README.md 

@@ -205,7 +205,9 @@ def load_all_models():
 st.title("Malaria Cell Detection App")
 st.info(
   "Upload a microscopic cell image to detect malaria infection. "
-  "Enable Grad-CAM to visualize which regions drove the prediction."
+  "Enable Grad-CAM to visualize which regions drove the prediction. "
+  "Want to try more images? Download the dataset from "
+  "[Kaggle](https://www.kaggle.com/datasets/iarunava/cell-images-for-detecting-malaria)"
 )
 
 # Load models
@@ -220,16 +222,29 @@ if show_gradcam:
     list(models_dict.keys())
   )
 
+# Sample images
+st.subheader("Don't have an image? Try a sample!")
+col_s1, col_s2 = st.columns(2)
+uploaded_image = None
+
+with col_s1:
+  if st.button("Use Infected Sample"):
+    uploaded_image = Image.open("samples/infected_sample.png").convert("RGB")
+  
+with col_s2:
+  if st.button("Use Uninfected Sample"):
+    uploaded_image = Image.open("samples/uninfected_sample.png").convert("RGB")
+
 # File uploader
 file = st.file_uploader("Upload a Cell Image", type=['jpg', 'png', 'jpeg'])
-
 if file:
   uploaded_image = Image.open(file).convert("RGB")
-  col1, col2 = st.columns(2)
 
+# Run predictions for both sample and uploaded image
+if uploaded_image is not None:
+  col1, col2 = st.columns(2)
   with col1:
     st.image(uploaded_image, caption="Uploaded Image", width=400)
-
   # Run all models
   results = {}
   for name, model_obj in models_dict.items():
@@ -247,7 +262,6 @@ if file:
     with col:
       color = "✅" if res["class"] == "Uninfected" else "❌"
       st.metric(label=name, value=f"{color} {res['class']}", delta=f"{res['confidence']:.1%} confidence")
-
   # Grad-CAM
   if show_gradcam and gradcam_model_name:
     with st.spinner("Generating Grad-CAM..."):
@@ -261,5 +275,3 @@ if file:
           st.image(overlay, caption=f"Grad-CAM ({gradcam_model_name})", width=400)
       except Exception  as e:
         st.error(f"Grad-CAM failed: {e}")
-
-

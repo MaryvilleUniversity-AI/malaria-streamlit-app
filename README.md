@@ -138,9 +138,3 @@ GitHub: [https://github.com/yourusername](https://github.com/MaryvilleUniversity
 
 * Dataset: NIH Malaria Dataset
 * Inspiration: Medical imaging and AI interpretability research
-
----
-
-## 📜 License
-
-This project is open source and available under the MIT License.

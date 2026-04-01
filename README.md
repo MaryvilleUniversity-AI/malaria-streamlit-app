@@ -130,7 +130,7 @@ Full model training, experimentation, and notebooks:
 ## 👤 Author
 
 MaryvilleUniversity-AI
-GitHub: [https://github.com/yourusername](https://github.com/MaryvilleUniversity-AI)
+GitHub: [https://github.com/MaryvilleUniversity-AI](https://github.com/MaryvilleUniversity-AI)
 
 ---
 

@@ -67,6 +67,8 @@ malaria-streamlit-app/
 ├── .gitignore
 ├── .python-version            # Python version pin
 ├── app.py                     # Main Streamlit application
+├── .dockerignore              # Files to exclude from Docker image
+├── Dockerfile                 # Docker configuration for local deployment
 ├── requirements.txt           # Dependencies
 ├── runtime.txt                # Python runtime for deployment
 └── README.md                  # Project documentation
@@ -94,6 +96,34 @@ pip install -r requirements.txt
 ``` bash
 streamlit run app.py
 ```
+
+---
+
+## 🐳 Run with Docker
+Prefer Docker? You can run the app in a container without installing any Python dependencies locally.
+
+### Prerequisites
+* [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running
+
+### 1. Clone the repository
+```bash
+git clone https://github.com/yourusername/malaria-streamlit-app.git
+cd malaria-streamlit-app
+```
+### 2. Build the Docker image
+```bash
+docker build -t malaria-app .
+```
+### 3. Run the container
+```bash
+docker run -p 8501:8501 malaria-app
+```
+### 4. Open the app
+   Open your browser and go to:
+```
+http://localhost:8501
+```
+> Note: Model weights are automatically downloaded from Hugging Face on the first run, so startup may take a moment.
 
 ---
 

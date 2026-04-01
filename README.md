@@ -129,7 +129,7 @@ http://localhost:8501
 
 ## ⏳ Notes
 
-* Model weights are automatically downloaded on first run from [Hugging Face]([https://huggingface](https://huggingface.co/DanLDevs/malaria-cell-detection)
+* Model weights are automatically downloaded on first run from [Hugging Face](https://huggingface.co/DanLDevs/malaria-cell-detection)
 * The hosted app loads quickly — no warm-up wait required
 
 ---
